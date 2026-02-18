@@ -1,3 +1,4 @@
-relic_synthiota
-relic_synthvoice
-relic_keymanager
+adafruit-circuitpython-display-text
+circuitpython-synthiota
+circuitpython-synthvoice
+circuitpython-waveform
