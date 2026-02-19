@@ -34,6 +34,41 @@ WAVEFORMS = [
 
 LED_COLOR = const(0xFF00FF)
 
+PARAM_WINDOW = 0.01
+PARAM_SMOOTHING = 0.2
+
+class Parameter:
+    def __init__(self, value: float = 0):
+        self._value = value
+        self._last_value = None
+        self._active = False
+        
+    def deactivate(self) -> None:
+        self._active = False
+
+    def update(self, value: float) -> float:
+        if self._last_value is None or abs(value - self._last_value) >= PARAM_WINDOW:
+            self._last_value = value
+        if abs(self._value - self._last_value) < PARAM_WINDOW:
+            self._active = True
+        if self._active:
+            self._value += (self._last_value - self._value) * PARAM_SMOOTHING
+        return self._value
+    
+    @property
+    def value(self) -> float:
+        return self._value
+    
+    @value.setter
+    def value(self, value: float) -> None:
+        self._value = value
+        self.deactivate()
+
+parameters = [
+    [Parameter() for i in range(len(PAGE_LABELS[j]))]
+    for j in range(PAGES)
+]
+
 # hardware and audio
 displayio.release_displays()
 synthiota = Synthiota(
@@ -129,6 +164,9 @@ def set_page(index: int = 0) -> None:
     index = min(max(index, 0), PAGES-1)
     if index == page:
         return
+    if page is not None:
+        for parameter in parameters[page]:
+            parameter.deactivate()
     page = index
     for i, page_group in enumerate(pages_group):
         page_group.hidden = i != page
@@ -153,31 +191,33 @@ def map_rate(value: float) -> float:
 
 while True:
     synthiota.update()
+    for i, parameter in enumerate(parameters[page]):
+        parameter.update(synthiota.pots[i])
 
     if page == 0:
-        voice.frequency = map_value(synthiota.pots[0], 10, 400, 2)
-        voice.detune = synthiota.pots[1]
+        voice.frequency = map_value(parameters[0][0].value, 10, 400, 2)
+        voice.detune = parameters[0][1].value
 
-        voice.vibrato_rate = map_rate(synthiota.pots[2])
-        voice.vibrato_depth = synthiota.pots[3]
+        voice.vibrato_rate = map_rate(parameters[0][2].value)
+        voice.vibrato_depth = parameters[0][3].value
 
-        voice.tremolo_rate = map_rate(synthiota.pots[4])
-        voice.tremolo_depth = synthiota.pots[5]
+        voice.tremolo_rate = map_rate(parameters[0][4].value)
+        voice.tremolo_depth = parameters[0][5].value
 
-        voice.filter_rate = map_rate(synthiota.pots[6])
-        voice.filter_depth = map_value(synthiota.pots[7], 0, synthiota.sample_rate / 4)
+        voice.filter_rate = map_rate(parameters[0][6].value)
+        voice.filter_depth = map_value(parameters[0][7].value, 0, synthiota.sample_rate / 4)
 
     elif page == 1:
-        effect_echo.delay_ms = map_value(synthiota.pots[0], 25, 500, 2)
-        effect_echo.decay = synthiota.pots[1]
-        effect_echo.mix = synthiota.pots[2]
+        effect_echo.delay_ms = map_value(parameters[0][0].value, 25, 500, 2)
+        effect_echo.decay = parameters[1][1].value
+        effect_echo.mix = parameters[1][2].value
 
-        effect_distortion.drive = synthiota.pots[3]
-        effect_distortion.mix = synthiota.pots[4]
+        effect_distortion.drive = parameters[1][3].value
+        effect_distortion.mix = parameters[1][4].value
 
-        effect_phaser.frequency.rate = map_rate(synthiota.pots[5])
-        effect_phaser.feedback = synthiota.pots[6]
-        effect_phaser.mix = synthiota.pots[7]
+        effect_phaser.frequency.rate = map_rate(parameters[1][5].value)
+        effect_phaser.feedback = parameters[1][6].value
+        effect_phaser.mix = parameters[1][7].value
 
     if (value := synthiota.left_slider.value) is not None:
         voice.filter_frequency = map_value(value, 20, synthiota.sample_rate / 2, 3)
@@ -201,5 +241,5 @@ while True:
 
     for i in range(8):
         bar = pages_group[page][2][i]
-        bar.height = int(BAR_HEIGHT * synthiota.pots[i])
+        bar.height = int(BAR_HEIGHT * parameters[page][i].value)
         bar.y = synthiota.display.height - bar.height
