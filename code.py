@@ -78,6 +78,7 @@ synthiota = Synthiota(
 synthiota.pot_leds = LED_COLOR
 
 effect_echo = Echo(
+    freq_shift=True,
     buffer_size=synthiota.buffer_size,
     sample_rate=synthiota.sample_rate,
     channel_count=synthiota.channel_count,
@@ -108,6 +109,7 @@ synth = Synthesizer(
 effect_distortion.play(synth)
 
 voice = Drone(synth, oscillators=8)
+voice.amplitude = 0.05
 
 # ui
 TITLE_HEIGHT = 20
