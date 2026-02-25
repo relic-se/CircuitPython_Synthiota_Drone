@@ -296,9 +296,19 @@ def set_waveform(index: int = 0) -> None:
 
     waveform_bmp.fill(0)
     waveform_min, waveform_max = min(waveform), max(waveform)
+    mid_y = waveform_bmp.height // 2
+    last_y = mid_y
     for x in range(waveform_bmp.width):
         i = round(x / waveform_bmp.width * len(waveform))
         y = round(map_value(waveform[i], waveform_min, waveform_max, waveform_bmp.height - 1, 0))
+        waveform_bmp[x,y] = 1
+        if abs(y - last_y) > 1:
+            step = 1 if y > last_y else -1
+            for j in range(last_y + step, y, step):
+                waveform_bmp[x,j] = 1
+        last_y = y
+    step = 1 if mid_y > last_y else -1
+    for y in range(last_y + step, mid_y, step):
         waveform_bmp[x,y] = 1
 
 set_waveform()
