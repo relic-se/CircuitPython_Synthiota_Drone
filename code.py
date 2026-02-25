@@ -184,6 +184,7 @@ PAGES = (
             ("AMP", Parameter(voice, "amplitude", 0, 1/8, 1/8)),
             ("ATK", Parameter(voice, "attack_time", 0.001, 5, 0.5, 4)),
             ("RLS", Parameter(voice, "release_time", 0.001, 5, 0.5, 4)),
+            ("GLD", Parameter(voice, "glide", 0.001, 5, 0.05, 4)),
         )
     ),
     (
