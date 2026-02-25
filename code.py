@@ -16,16 +16,34 @@ from terminalio import FONT
 from synthio import Synthesizer, LFO
 import vectorio
 from micropython import const
+from rainbowio import colorwheel
+import microcontroller
+
+# improve performance with a light overclock
+microcontroller.cpu.frequency = 300_000_000
 
 WAVEFORMS = [
     relic_waveform.square(),
+    relic_waveform.square(duty_cycle=0.25),
     relic_waveform.saw(),
+    relic_waveform.mix(
+        (relic_waveform.saw(), 0.6),
+        (relic_waveform.saw(frequency=2), 0.6),
+    ),
+    relic_waveform.mix(
+        (relic_waveform.triangle(), 0.7),
+        (relic_waveform.saw(frequency=2.0), 0.1),
+        (relic_waveform.saw(frequency=3.0), 0.1),
+        (relic_waveform.saw(frequency=4.0), 0.1),
+    ),
     relic_waveform.triangle(),
     relic_waveform.sine(),
     relic_waveform.noise(),
 ]
 
 LED_COLOR = const(0xFF00FF)
+LED_PRESS_COLOR = const(0xFFFF00)
+LED_LATCH_COLOR = const(0xFF0000)
 
 # hardware and audio
 displayio.release_displays()
@@ -33,7 +51,6 @@ synthiota = Synthiota(
     sample_rate=32000,
     channel_count=1,
 )
-synthiota.pot_leds = LED_COLOR
 
 effect_echo = Echo(
     freq_shift=True,
@@ -167,6 +184,7 @@ PAGES = (
             ("AMP", Parameter(voice, "amplitude", 0, 1/8, 1/8)),
             ("ATK", Parameter(voice, "attack_time", 0.001, 5, 0.5, 4)),
             ("RLS", Parameter(voice, "release_time", 0.001, 5, 0.5, 4)),
+            ("GLD", Parameter(voice, "glide", 0.001, 5, 0.05, 4)),
         )
     ),
     (
@@ -313,44 +331,83 @@ def set_waveform(index: int = 0) -> None:
 
 set_waveform()
 
+def apply_brightness(color: int, value: float) -> int:
+    value = min(max(value, 0), 1)
+    output = 0x000000
+    for i in range(3):
+        component = (color >> (8 * i)) & 0xFF
+        component = round(component * value) & 0xFF
+        output |= component << (8 * i)
+    return output
+
+def get_lfo_value(lfo: LFO, max_scale: float = 1, minimum: float = 0, maximum: float = 1) -> float:
+    return map_value(lfo.value, lfo.offset - max_scale, lfo.offset + max_scale, minimum, maximum)
+
 latched = False
-last_step_index = None
+step_index = None
+led_index = None
 while True:
     synthiota.update()
 
-    for i, (label, parameter) in enumerate(PAGES[page][1]):
-        parameter.update(synthiota.pots[i])
-
-    left_slider_parameter.update(synthiota.left_slider.value)
-    right_slider_parameter.update(synthiota.right_slider.value)
-
-    if synthiota.encoder_button.pressed:
-        latched = not latched
-        if latched and not voice.pressed:
-            voice.press()
-        elif not latched and voice.pressed:
-            voice.release()
-
-    try:
-        step_index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
-    except ValueError:
-        if not latched and voice.pressed:
-            voice.release()
-        last_step_index = None
-    else:
-        if step_index != last_step_index:
-            voice.press(48 + step_index)
-            last_step_index = step_index
-
-    if synthiota.octave_up_button.pressed:
-        set_waveform(waveform_index + 1)
-    if synthiota.octave_down_button.pressed:
-        set_waveform(waveform_index - 1)
-
+    # change page
     if synthiota.encoder.position != 0:
         set_page(page + (1 if synthiota.encoder.position < 0 else -1))
         synthiota.encoder.position = 0
 
+    # update page parameters
+    for i, (label, parameter) in enumerate(PAGES[page][1]):
+        parameter.update(synthiota.pots[i])
+
+    # update sliders
+    left_slider_parameter.update(synthiota.left_slider.value)
+    right_slider_parameter.update(synthiota.right_slider.value)
+
+    # control waveform
+    if synthiota.up_button.pressed:
+        set_waveform(waveform_index + 1)
+    if synthiota.down_button.pressed:
+        set_waveform(waveform_index - 1)
+
+    # handle latching
+    if synthiota.encoder_button.pressed:
+        latched = not latched
+        if latched and not voice.pressed:
+            voice.press()
+            led_index = 0
+        elif not latched and voice.pressed:
+            voice.release()
+            led_index = None
+
+    # handle step touches
+    try:
+        index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
+    except ValueError:
+        if not latched and voice.pressed:
+            voice.release()
+            led_index = None
+        step_index = None
+    else:
+        if index != step_index:
+            voice.press(48 + index)
+            step_index = index
+            led_index = index
+
+    # control step leds
+    step_leds = [LED_PRESS_COLOR if led_index is not None and led_index == i else (LED_LATCH_COLOR if latched else 0x000000) for i in range(16)]
+
+    # control oscillator leds
+    pot_leds = [0x000000 for i in range(8)]
+    for i in range(voice.oscillators):
+        vibrato_lfo = voice._bend[i].b.a
+        tremolo_lfo = voice._amplitude[i].b.a
+        color = colorwheel(get_lfo_value(vibrato_lfo, maximum=255))
+        color = apply_brightness(color, get_lfo_value(tremolo_lfo))
+        pot_leds[i] = color
+
+    # update neopixels
+    synthiota.leds[:] = tuple(step_leds) + tuple(pot_leds) + synthiota.mode_leds
+    
+    # update parameter ui bars
     for i in range(min(8, len(pages_group[page][2]))):
         bar = pages_group[page][2][i]
         bar.height = int(BAR_HEIGHT * PAGES[page][1][i][1].raw_value)
