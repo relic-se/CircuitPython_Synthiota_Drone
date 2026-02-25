@@ -162,7 +162,7 @@ PAGES = (
         "OSC",
         (
             ("OSC", Parameter(voice, "oscillators", 1, 8, 3, round=True)),
-            ("FQ", Parameter(voice, "frequency", 10, 800)),
+            ("FQ", Parameter(voice, "tune", -4, 2, -2)),
             ("DT", Parameter(voice, "detune")),
         )
     ),
@@ -282,10 +282,8 @@ def set_waveform(index: int = 0) -> None:
     voice.waveform = WAVEFORMS[waveform]
 set_waveform()
 
-def map_value(value: float, min_val: float, max_val: float, exp: int = 1) -> float:
-    return pow(value, exp) * (max_val - min_val) + min_val
-
 latched = False
+last_step_index = None
 while True:
     synthiota.update()
 
@@ -301,6 +299,17 @@ while True:
             voice.press()
         elif not latched and voice.pressed:
             voice.release()
+
+    try:
+        step_index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
+    except ValueError:
+        if not latched and voice.pressed:
+            voice.release()
+        last_step_index = None
+    else:
+        if step_index != last_step_index:
+            voice.press(48 + step_index)
+            last_step_index = step_index
 
     if synthiota.octave_up_button.pressed:
         set_waveform(waveform + 1)
