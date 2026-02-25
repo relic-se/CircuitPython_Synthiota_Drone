@@ -17,13 +17,6 @@ from synthio import Synthesizer, LFO
 import vectorio
 from micropython import const
 
-PAGES = const(2)
-PAGE_TITLES = ("OSC", "EFX")
-PAGE_LABELS = (
-    ("FQ","DT","VR","VA","TR","TA","FR","FA"),
-    ("ET","ED","EM","DD","DM","PR","PF","PM")
-)
-
 WAVEFORMS = [
     relic_waveform.square(),
     relic_waveform.saw(),
@@ -33,41 +26,6 @@ WAVEFORMS = [
 ]
 
 LED_COLOR = const(0xFF00FF)
-
-PARAM_WINDOW = 0.01
-PARAM_SMOOTHING = 0.2
-
-class Parameter:
-    def __init__(self, value: float = 0):
-        self._value = value
-        self._last_value = None
-        self._active = False
-        
-    def deactivate(self) -> None:
-        self._active = False
-
-    def update(self, value: float) -> float:
-        if self._last_value is None or abs(value - self._last_value) >= PARAM_WINDOW:
-            self._last_value = value
-        if abs(self._value - self._last_value) < PARAM_WINDOW:
-            self._active = True
-        if self._active:
-            self._value += (self._last_value - self._value) * PARAM_SMOOTHING
-        return self._value
-    
-    @property
-    def value(self) -> float:
-        return self._value
-    
-    @value.setter
-    def value(self, value: float) -> None:
-        self._value = value
-        self.deactivate()
-
-parameters = [
-    [Parameter() for i in range(len(PAGE_LABELS[j]))]
-    for j in range(PAGES)
-]
 
 # hardware and audio
 displayio.release_displays()
@@ -108,8 +66,147 @@ synth = Synthesizer(
 )
 effect_distortion.play(synth)
 
-voice = Drone(synth, oscillators=8)
+voice = Drone(synth, max_oscillators=8)
 voice.amplitude = 0.05
+
+# parameters
+PARAM_WINDOW = 0.01
+
+class Parameter:
+
+    def __init__(self, obj: object = None, name: str = "", minimum: float = 0, maximum: float = 1, value: float = None, shape: int = 1, smoothing: float = 0.5, round: bool = False):
+        self._object = obj
+        self._name = name
+        self._minimum = minimum
+        self._maximum = maximum
+        self._shape = max(shape, 1)
+        self._smoothing = min(max(smoothing, 0.001), 1)
+        self._round = round
+
+        self.value = minimum if value is None else value
+        self._last_value = None
+
+        self._setattr()  # set initial value
+
+    @staticmethod
+    def _map(in_value: float, in_minimum: float, in_maximum: float, out_minimum: float, out_maximum: float, clamp: bool = True) -> float:
+        if clamp:
+            in_value = min(max(in_value, in_minimum), in_maximum)
+        return (in_value - in_minimum) / (in_maximum - in_minimum) * (out_maximum - out_minimum) + out_minimum
+
+    def _get_map_value(self, value: float = None) -> float:
+        if value is None:
+            value = self._value
+        value = min(max(value, 0), 1)
+        if self._shape > 1:
+            value = pow(value, self._shape)
+        value = self._map(value, 0, 1, self._minimum, self._maximum)
+        if self._round:
+            value = round(value)
+        return value
+    
+    def _setattr(self) -> None:
+        if self._object is not None and len(self._name):
+            setattr(self._object, self._name, self._map_value)
+        
+    def deactivate(self) -> None:
+        self._active = False
+
+    def update(self, value: float) -> None:
+        if value is None:
+            return
+        if self._last_value is None or abs(value - self._last_value) >= PARAM_WINDOW:
+            self._last_value = value
+        if abs(self._value - self._last_value) < PARAM_WINDOW:
+            self._active = True
+        if self._active:
+            self._value += (self._last_value - self._value) * self._smoothing
+
+            # update mapped value
+            self._map_value = self._get_map_value()
+
+            # update object
+            self._setattr()
+    
+    @property
+    def value(self) -> float:
+        return self._map_value
+    
+    @value.setter
+    def value(self, value: float) -> None:
+        self._map_value = min(max(value, self._minimum), self._maximum)
+
+        # calculate relative value
+        self._value = self._map(self._map_value, self._minimum, self._maximum, 0, 1)
+        if self._shape > 1:
+            self._value = pow(self._value, 1 / self._shape)  # invert smoothing
+
+        self._setattr()
+        self.deactivate()
+
+    @property
+    def raw_value(self) -> float:
+        return self._value
+    
+    @raw_value.setter
+    def raw_value(self, value: float) -> None:
+        self._value = value
+        self._map_value = self._get_map_value()
+
+        self._setattr()
+        self.deactivate()
+
+
+PAGES = (
+    (
+        "OSC",
+        (
+            ("OSC", Parameter(voice, "oscillators", 1, 8, 3, round=True)),
+            ("FQ", Parameter(voice, "frequency", 10, 800)),
+            ("DT", Parameter(voice, "detune")),
+        )
+    ),
+    (
+        "MOD",
+        (
+            ("VR", Parameter(voice, "vibrato_rate", 0.1, 8, 1, 3)),
+            ("VA", Parameter(voice, "vibrato_depth")),
+
+            ("TR", Parameter(voice, "tremolo_rate", 0.1, 8, 1, 3)),
+            ("TA", Parameter(voice, "tremolo_depth")),
+
+            ("FR", Parameter(voice, "filter_rate", 0.1, 8, 1, 3)),
+            ("FA", Parameter(voice, "filter_depth")),
+        )
+    ),
+    (
+        "EFX",
+        (
+            ("ET", Parameter(effect_echo, "delay_ms", 25, 500, 250, 2)),
+            ("ED", Parameter(effect_echo, "decay", value=0.25)),
+            ("EM", Parameter(effect_echo, "mix")),
+
+            ("DD", Parameter(effect_distortion, "drive", value=0.5)),
+            ("DM", Parameter(effect_distortion, "mix")),
+
+            ("PR", Parameter(effect_phaser.frequency, "rate", 0.1, 8, 1, 3)),
+            ("PF", Parameter(effect_phaser, "feedback", value=0.5)),
+            ("PM", Parameter(effect_phaser, "mix")),
+        )
+    )
+)
+
+left_slider_parameter = Parameter(
+    voice, "filter_frequency",
+    20, synthiota.sample_rate / 2, 2000,
+    shape=4, smoothing=0.05,
+)
+
+right_slider_parameter = Parameter(
+    voice, "filter_resonance",
+    0.7, 16, 1.5,
+    shape=2, smoothing=0.05,
+)
 
 # ui
 TITLE_HEIGHT = 20
@@ -131,13 +228,13 @@ root_group.append(Label(
 pages_group = displayio.Group()
 root_group.append(pages_group)
 
-for i in range(PAGES):
+for i, (title, parameters) in enumerate(PAGES):
     page_group = displayio.Group()
     page_group.hidden = True
     pages_group.append(page_group)
 
     page_group.append(Label(
-        font=FONT, text=PAGE_TITLES[i], color=0xFFFFFF, scale=2,
+        font=FONT, text=title, color=0xFFFFFF, scale=2,
         anchored_position=(synthiota.display.width-3, TITLE_HEIGHT//2),
         anchor_point=(1, 0.5),
     ))
@@ -148,7 +245,7 @@ for i in range(PAGES):
     bar_group = displayio.Group()
     page_group.append(bar_group)
     
-    for j, label in enumerate(PAGE_LABELS[i]):
+    for j, (label, parameter) in enumerate(parameters):
         label_group.append(Label(
             font=FONT, text=label, color=0xFFFFFF,
             anchored_position=(j*BAR_WIDTH+BAR_WIDTH//2, TITLE_HEIGHT+LABEL_HEIGHT//2),
@@ -163,22 +260,22 @@ for i in range(PAGES):
 page = None
 def set_page(index: int = 0) -> None:
     global page
-    index = min(max(index, 0), PAGES-1)
+    index = min(max(index, 0), len(PAGES)-1)
     if index == page:
         return
     if page is not None:
-        for parameter in parameters[page]:
+        for label, parameter in PAGES[page][1]:
             parameter.deactivate()
     page = index
     for i, page_group in enumerate(pages_group):
         page_group.hidden = i != page
-    synthiota.mode_leds = [LED_COLOR if page == i else 0x000000 for i in range(3)]
+    synthiota.mode_leds = [LED_COLOR if page & (1 << i) else 0x000000 for i in range(3)]
 set_page()
 
 waveform = None
 def set_waveform(index: int = 0) -> None:
     global waveform
-    index = min(max(index, 0), len(WAVEFORMS))
+    index = min(max(index, 0), len(WAVEFORMS) - 1)
     if index == waveform:
         return
     waveform = index
@@ -188,48 +285,21 @@ set_waveform()
 def map_value(value: float, min_val: float, max_val: float, exp: int = 1) -> float:
     return pow(value, exp) * (max_val - min_val) + min_val
 
-def map_rate(value: float) -> float:
-    return map_value(value, 0.1, 8, 3)
-
+latched = False
 while True:
     synthiota.update()
-    for i, parameter in enumerate(parameters[page]):
+
+    for i, (label, parameter) in enumerate(PAGES[page][1]):
         parameter.update(synthiota.pots[i])
 
-    if page == 0:
-        voice.frequency = map_value(parameters[0][0].value, 10, 400, 2)
-        voice.detune = parameters[0][1].value
-
-        voice.vibrato_rate = map_rate(parameters[0][2].value)
-        voice.vibrato_depth = parameters[0][3].value
-
-        voice.tremolo_rate = map_rate(parameters[0][4].value)
-        voice.tremolo_depth = parameters[0][5].value
-
-        voice.filter_rate = map_rate(parameters[0][6].value)
-        voice.filter_depth = map_value(parameters[0][7].value, 0, synthiota.sample_rate / 4)
-
-    elif page == 1:
-        effect_echo.delay_ms = map_value(parameters[0][0].value, 25, 500, 2)
-        effect_echo.decay = parameters[1][1].value
-        effect_echo.mix = parameters[1][2].value
-
-        effect_distortion.drive = parameters[1][3].value
-        effect_distortion.mix = parameters[1][4].value
-
-        effect_phaser.frequency.rate = map_rate(parameters[1][5].value)
-        effect_phaser.feedback = parameters[1][6].value
-        effect_phaser.mix = parameters[1][7].value
-
-    if (value := synthiota.left_slider.value) is not None:
-        voice.filter_frequency = map_value(value, 20, synthiota.sample_rate / 2, 3)
-    if (value := synthiota.right_slider.value) is not None:
-        voice.filter_resonance = map_value(value, 0.7, 16, 2)
+    left_slider_parameter.update(synthiota.left_slider.value)
+    right_slider_parameter.update(synthiota.right_slider.value)
 
     if synthiota.encoder_button.pressed:
-        if not voice.pressed:
+        latched = not latched
+        if latched and not voice.pressed:
             voice.press()
-        else:
+        elif not latched and voice.pressed:
             voice.release()
 
     if synthiota.octave_up_button.pressed:
@@ -241,7 +311,7 @@ while True:
         set_page(page + (1 if synthiota.encoder.position < 0 else -1))
         synthiota.encoder.position = 0
 
-    for i in range(8):
+    for i in range(min(8, len(pages_group[page][2]))):
         bar = pages_group[page][2][i]
-        bar.height = int(BAR_HEIGHT * parameters[page][i].value)
+        bar.height = int(BAR_HEIGHT * PAGES[page][1][i][1].raw_value)
         bar.y = synthiota.display.height - bar.height
