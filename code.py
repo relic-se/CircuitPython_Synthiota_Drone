@@ -17,6 +17,10 @@ from synthio import Synthesizer, LFO
 import vectorio
 from micropython import const
 from rainbowio import colorwheel
+import microcontroller
+
+# improve performance with a light overclock
+microcontroller.cpu.frequency = 300_000_000
 
 WAVEFORMS = [
     relic_waveform.square(),
@@ -377,11 +381,7 @@ while True:
             led_index = index
 
     # control step leds
-    led_color =  LED_LATCH_COLOR if latched else 0x000000
-    if led_index is not None:
-        synthiota.step_leds = [LED_PRESS_COLOR if led_index == i else led_color for i in range(16)]
-    else:
-        synthiota.step_leds = led_color
+    step_leds = [LED_PRESS_COLOR if led_index is not None and led_index == i else (LED_LATCH_COLOR if latched else 0x000000) for i in range(16)]
 
     # control oscillator leds
     pot_leds = [0x000000 for i in range(8)]
@@ -391,8 +391,10 @@ while True:
         color = colorwheel(get_lfo_value(vibrato_lfo, maximum=255))
         color = apply_brightness(color, get_lfo_value(tremolo_lfo))
         pot_leds[i] = color
-    synthiota.pot_leds = pot_leds
-        
+
+    # update neopixels
+    synthiota.leds[:] = tuple(step_leds) + tuple(pot_leds) + synthiota.mode_leds
+    
     # update parameter ui bars
     for i in range(min(8, len(pages_group[page][2]))):
         bar = pages_group[page][2][i]
