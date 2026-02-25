@@ -78,7 +78,7 @@ def map_value(in_value: float, in_minimum: float, in_maximum: float, out_minimum
 
 class Parameter:
 
-    def __init__(self, obj: object = None, name: str = "", minimum: float = 0, maximum: float = 1, value: float = None, shape: int = 1, smoothing: float = 0.5, round: bool = False):
+    def __init__(self, obj: object = None, name: str = "", minimum: float = 0, maximum: float = 1, value: float = None, shape: int = 1, smoothing: float = 0.5, round: bool = False, window: bool = True):
         self._object = obj
         self._name = name
         self._minimum = minimum
@@ -86,6 +86,7 @@ class Parameter:
         self._shape = max(shape, 1)
         self._smoothing = min(max(smoothing, 0.001), 1)
         self._round = round
+        self._window = window
 
         self.value = minimum if value is None else value
         self._last_value = None
@@ -115,7 +116,7 @@ class Parameter:
             return
         if self._last_value is None or abs(value - self._last_value) >= PARAM_WINDOW:
             self._last_value = value
-        if abs(self._value - self._last_value) < PARAM_WINDOW:
+        if not self._window or abs(self._value - self._last_value) < PARAM_WINDOW:
             self._active = True
         if self._active:
             self._value += (self._last_value - self._value) * self._smoothing
@@ -201,13 +202,13 @@ PAGES = (
 left_slider_parameter = Parameter(
     voice, "filter_frequency",
     20, synthiota.sample_rate / 2, 2000,
-    shape=4, smoothing=0.05,
+    shape=4, smoothing=0.05, window=False,
 )
 
 right_slider_parameter = Parameter(
     voice, "filter_resonance",
     0.7, 16, 1.5,
-    shape=2, smoothing=0.05,
+    shape=2, smoothing=0.05, window=False,
 )
 
 # ui
