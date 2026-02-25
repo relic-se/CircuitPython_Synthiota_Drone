@@ -318,12 +318,26 @@ last_step_index = None
 while True:
     synthiota.update()
 
+    # change page
+    if synthiota.encoder.position != 0:
+        set_page(page + (1 if synthiota.encoder.position < 0 else -1))
+        synthiota.encoder.position = 0
+
+    # update page parameters
     for i, (label, parameter) in enumerate(PAGES[page][1]):
         parameter.update(synthiota.pots[i])
 
+    # update sliders
     left_slider_parameter.update(synthiota.left_slider.value)
     right_slider_parameter.update(synthiota.right_slider.value)
 
+    # control waveform
+    if synthiota.up_button.pressed:
+        set_waveform(waveform_index + 1)
+    if synthiota.down_button.pressed:
+        set_waveform(waveform_index - 1)
+
+    # handle latching
     if synthiota.encoder_button.pressed:
         latched = not latched
         if latched and not voice.pressed:
@@ -331,6 +345,7 @@ while True:
         elif not latched and voice.pressed:
             voice.release()
 
+    # handle step touches
     try:
         step_index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
     except ValueError:
@@ -341,16 +356,8 @@ while True:
         if step_index != last_step_index:
             voice.press(48 + step_index)
             last_step_index = step_index
-
-    if synthiota.octave_up_button.pressed:
-        set_waveform(waveform_index + 1)
-    if synthiota.octave_down_button.pressed:
-        set_waveform(waveform_index - 1)
-
-    if synthiota.encoder.position != 0:
-        set_page(page + (1 if synthiota.encoder.position < 0 else -1))
-        synthiota.encoder.position = 0
-
+        
+    # update parameter ui bars
     for i in range(min(8, len(pages_group[page][2]))):
         bar = pages_group[page][2][i]
         bar.height = int(BAR_HEIGHT * PAGES[page][1][i][1].raw_value)
