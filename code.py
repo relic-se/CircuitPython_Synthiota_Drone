@@ -26,6 +26,8 @@ WAVEFORMS = [
 ]
 
 LED_COLOR = const(0xFF00FF)
+LED_PRESS_COLOR = const(0xFFFF00)
+LED_LATCH_COLOR = const(0xFF0000)
 
 # hardware and audio
 displayio.release_displays()
@@ -314,7 +316,8 @@ def set_waveform(index: int = 0) -> None:
 set_waveform()
 
 latched = False
-last_step_index = None
+step_index = None
+led_index = None
 while True:
     synthiota.update()
 
@@ -342,20 +345,31 @@ while True:
         latched = not latched
         if latched and not voice.pressed:
             voice.press()
+            led_index = 0
         elif not latched and voice.pressed:
             voice.release()
+            led_index = None
 
     # handle step touches
     try:
-        step_index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
+        index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
     except ValueError:
         if not latched and voice.pressed:
             voice.release()
-        last_step_index = None
+            led_index = None
+        step_index = None
     else:
-        if step_index != last_step_index:
-            voice.press(48 + step_index)
-            last_step_index = step_index
+        if index != step_index:
+            voice.press(48 + index)
+            step_index = index
+            led_index = index
+
+    # control step leds
+    led_color =  LED_LATCH_COLOR if latched else 0x000000
+    if led_index is not None:
+        synthiota.step_leds = [LED_PRESS_COLOR if led_index == i else led_color for i in range(16)]
+    else:
+        synthiota.step_leds = led_color
         
     # update parameter ui bars
     for i in range(min(8, len(pages_group[page][2]))):
