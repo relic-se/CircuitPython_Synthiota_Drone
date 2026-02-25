@@ -67,7 +67,6 @@ synth = Synthesizer(
 effect_distortion.play(synth)
 
 voice = Drone(synth, max_oscillators=8)
-voice.amplitude = 0.05
 
 # parameters
 PARAM_WINDOW = 0.01
@@ -161,9 +160,13 @@ PAGES = (
     (
         "OSC",
         (
+            ("LVL", Parameter(synthiota.mixer.voice[0], "level", 0, 1, 0.25)),
             ("OSC", Parameter(voice, "oscillators", 1, 8, 3, round=True)),
             ("FQ", Parameter(voice, "tune", -4, 2, -2)),
             ("DT", Parameter(voice, "detune")),
+            ("AMP", Parameter(voice, "amplitude", 0, 1/8, 1/8)),
+            ("ATK", Parameter(voice, "attack_time", 0.001, 5, 0.5, 4)),
+            ("RLS", Parameter(voice, "release_time", 0.001, 5, 0.5, 4)),
         )
     ),
     (
