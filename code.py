@@ -24,7 +24,18 @@ microcontroller.cpu.frequency = 300_000_000
 
 WAVEFORMS = [
     relic_waveform.square(),
+    relic_waveform.square(duty_cycle=0.25),
     relic_waveform.saw(),
+    relic_waveform.mix(
+        (relic_waveform.saw(), 0.6),
+        (relic_waveform.saw(frequency=2), 0.6),
+    ),
+    relic_waveform.mix(
+        (relic_waveform.triangle(), 0.7),
+        (relic_waveform.saw(frequency=2.0), 0.1),
+        (relic_waveform.saw(frequency=3.0), 0.1),
+        (relic_waveform.saw(frequency=4.0), 0.1),
+    ),
     relic_waveform.triangle(),
     relic_waveform.sine(),
     relic_waveform.noise(),
