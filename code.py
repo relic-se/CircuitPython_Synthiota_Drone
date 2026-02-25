@@ -16,6 +16,7 @@ from terminalio import FONT
 from synthio import Synthesizer, LFO
 import vectorio
 from micropython import const
+from rainbowio import colorwheel
 
 WAVEFORMS = [
     relic_waveform.square(),
@@ -35,7 +36,6 @@ synthiota = Synthiota(
     sample_rate=32000,
     channel_count=1,
 )
-synthiota.pot_leds = LED_COLOR
 
 effect_echo = Echo(
     freq_shift=True,
@@ -315,6 +315,18 @@ def set_waveform(index: int = 0) -> None:
 
 set_waveform()
 
+def apply_brightness(color: int, value: float) -> int:
+    value = min(max(value, 0), 1)
+    output = 0x000000
+    for i in range(3):
+        component = (color >> (8 * i)) & 0xFF
+        component = round(component * value) & 0xFF
+        output |= component << (8 * i)
+    return output
+
+def get_lfo_value(lfo: LFO, max_scale: float = 1, minimum: float = 0, maximum: float = 1) -> float:
+    return map_value(lfo.value, lfo.offset - max_scale, lfo.offset + max_scale, minimum, maximum)
+
 latched = False
 step_index = None
 led_index = None
@@ -370,6 +382,16 @@ while True:
         synthiota.step_leds = [LED_PRESS_COLOR if led_index == i else led_color for i in range(16)]
     else:
         synthiota.step_leds = led_color
+
+    # control oscillator leds
+    pot_leds = [0x000000 for i in range(8)]
+    for i in range(voice.oscillators):
+        vibrato_lfo = voice._bend[i].b.a
+        tremolo_lfo = voice._amplitude[i].b.a
+        color = colorwheel(get_lfo_value(vibrato_lfo, maximum=255))
+        color = apply_brightness(color, get_lfo_value(tremolo_lfo))
+        pot_leds[i] = color
+    synthiota.pot_leds = pot_leds
         
     # update parameter ui bars
     for i in range(min(8, len(pages_group[page][2]))):
