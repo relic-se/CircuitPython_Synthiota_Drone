@@ -71,6 +71,11 @@ voice = Drone(synth, max_oscillators=8)
 # parameters
 PARAM_WINDOW = 0.01
 
+def map_value(in_value: float, in_minimum: float, in_maximum: float, out_minimum: float, out_maximum: float, clamp: bool = True) -> float:
+    if clamp:
+        in_value = min(max(in_value, in_minimum), in_maximum)
+    return (in_value - in_minimum) / (in_maximum - in_minimum) * (out_maximum - out_minimum) + out_minimum
+
 class Parameter:
 
     def __init__(self, obj: object = None, name: str = "", minimum: float = 0, maximum: float = 1, value: float = None, shape: int = 1, smoothing: float = 0.5, round: bool = False):
@@ -87,19 +92,13 @@ class Parameter:
 
         self._setattr()  # set initial value
 
-    @staticmethod
-    def _map(in_value: float, in_minimum: float, in_maximum: float, out_minimum: float, out_maximum: float, clamp: bool = True) -> float:
-        if clamp:
-            in_value = min(max(in_value, in_minimum), in_maximum)
-        return (in_value - in_minimum) / (in_maximum - in_minimum) * (out_maximum - out_minimum) + out_minimum
-
     def _get_map_value(self, value: float = None) -> float:
         if value is None:
             value = self._value
         value = min(max(value, 0), 1)
         if self._shape > 1:
             value = pow(value, self._shape)
-        value = self._map(value, 0, 1, self._minimum, self._maximum)
+        value = map_value(value, 0, 1, self._minimum, self._maximum)
         if self._round:
             value = round(value)
         return value
@@ -136,7 +135,7 @@ class Parameter:
         self._map_value = min(max(value, self._minimum), self._maximum)
 
         # calculate relative value
-        self._value = self._map(self._map_value, self._minimum, self._maximum, 0, 1)
+        self._value = map_value(self._map_value, self._minimum, self._maximum, 0, 1)
         if self._shape > 1:
             self._value = pow(self._value, 1 / self._shape)  # invert smoothing
 
@@ -219,14 +218,22 @@ BAR_WIDTH = synthiota.display.width//8
 
 root_group = displayio.Group()
 synthiota.display.root_group = root_group
-palette = displayio.Palette(1)
-palette[0] = 0xFFFFFF
+palette = displayio.Palette(2)
+palette[0] = 0x000000
+palette[1] = 0xFFFFFF
 
 root_group.append(Label(
     font=FONT, text="Drone", color=0xFFFFFF, scale=2,
     anchored_position=(0, TITLE_HEIGHT//2),
     anchor_point=(0, 0.5),
 ))
+
+waveform_bmp = displayio.Bitmap(TITLE_HEIGHT, TITLE_HEIGHT, 2)
+waveform_tg = displayio.TileGrid(
+    waveform_bmp, pixel_shader=palette,
+    x=synthiota.display.width//2,
+)
+root_group.append(waveform_tg)
 
 pages_group = displayio.Group()
 root_group.append(pages_group)
@@ -255,7 +262,7 @@ for i, (title, parameters) in enumerate(PAGES):
             anchor_point=(0.5, 0.5),
         ))
         bar_group.append(vectorio.Rectangle(
-            pixel_shader=palette,
+            pixel_shader=palette, color_index=1,
             width=BAR_WIDTH, height=BAR_HEIGHT,
             x=j*BAR_WIDTH, y=TITLE_HEIGHT+LABEL_HEIGHT,
         ))
@@ -275,14 +282,24 @@ def set_page(index: int = 0) -> None:
     synthiota.mode_leds = [LED_COLOR if page & (1 << i) else 0x000000 for i in range(3)]
 set_page()
 
-waveform = None
+waveform_index = None
 def set_waveform(index: int = 0) -> None:
-    global waveform
+    global waveform_index
     index = min(max(index, 0), len(WAVEFORMS) - 1)
-    if index == waveform:
+    if index == waveform_index:
         return
-    waveform = index
-    voice.waveform = WAVEFORMS[waveform]
+    waveform_index = index
+    waveform = WAVEFORMS[waveform_index]
+
+    voice.waveform = waveform
+
+    waveform_bmp.fill(0)
+    waveform_min, waveform_max = min(waveform), max(waveform)
+    for x in range(waveform_bmp.width):
+        i = round(x / waveform_bmp.width * len(waveform))
+        y = round(map_value(waveform[i], waveform_min, waveform_max, waveform_bmp.height - 1, 0))
+        waveform_bmp[x,y] = 1
+
 set_waveform()
 
 latched = False
@@ -315,9 +332,9 @@ while True:
             last_step_index = step_index
 
     if synthiota.octave_up_button.pressed:
-        set_waveform(waveform + 1)
+        set_waveform(waveform_index + 1)
     if synthiota.octave_down_button.pressed:
-        set_waveform(waveform - 1)
+        set_waveform(waveform_index - 1)
 
     if synthiota.encoder.position != 0:
         set_page(page + (1 if synthiota.encoder.position < 0 else -1))
