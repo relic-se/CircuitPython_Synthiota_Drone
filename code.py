@@ -16,7 +16,7 @@ from micropython import const
 from rainbowio import colorwheel
 import microcontroller
 
-# improve performance with a light overclock
+# improve performance with an overclock
 microcontroller.cpu.frequency = 300_000_000
 
 WAVEFORMS = [
@@ -328,8 +328,10 @@ def set_waveform(index: int = 0) -> None:
 
 set_waveform()
 
-def apply_brightness(color: int, value: float) -> int:
+def apply_brightness(color: int, value: float, shape: int = 2) -> int:
     value = min(max(value, 0), 1)
+    if shape > 1:
+        value = pow(value, shape)
     output = 0x000000
     for i in range(3):
         component = (color >> (8 * i)) & 0xFF
