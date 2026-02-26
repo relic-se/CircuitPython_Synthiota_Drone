@@ -2,9 +2,6 @@
 #
 # SPDX-License-Identifier: GPLv3
 
-# TODO: control `synthiota.pot_leds`` to represent `voice.notes` state
-# TODO: Use step pads for frequency?
-
 from audiodelays import Echo
 from audiofilters import Distortion, DistortionMode, Phaser
 from adafruit_display_text.label import Label
