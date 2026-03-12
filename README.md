@@ -1,6 +1,10 @@
 # Synthiota Drone Synthesizer
 8-voice drone synthesizer written in CircuitPython for the [Synthiota](https://github.com/todbot/synthiota).
 
+## Video Demonstration
+
+[![Thumbnail of video demonstration hosted on YouTube](./assets/video.jpg)](https://youtu.be/6oZ6IUpAfgI?si=fsnmxTWXVVQDLwPw)
+
 ## Building CircuitPython Package
 Ensure that you have python 3.x installed system-wide and all the prerequisite libraries installed using the following command:
 
