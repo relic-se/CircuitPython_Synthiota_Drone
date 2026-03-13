@@ -3,18 +3,20 @@
 # SPDX-License-Identifier: GPLv3
 
 from audiodelays import Echo
-from audiofilters import Distortion, DistortionMode, Phaser
+from audiofilters import Distortion, DistortionMode, Filter, Phaser
 from adafruit_display_text.label import Label
 import displayio
 from relic_synthiota import Synthiota
+from relic_synthvoice import AREnvelope
 from relic_synthvoice.drone import Drone
 import relic_waveform
 from terminalio import FONT
-from synthio import Synthesizer, LFO
+from synthio import Biquad, FilterMode, LFO, Math, MathOperation, Synthesizer
 import vectorio
 from micropython import const
 from rainbowio import colorwheel
 import microcontroller
+import ulab.numpy as np
 
 # improve performance with an overclock
 microcontroller.cpu.frequency = 300_000_000
@@ -38,6 +40,12 @@ WAVEFORMS = [
     relic_waveform.noise(),
 ]
 
+ENVELOPE_TIME_MIN = 0.001
+ENVELOPE_TIME_MAX = 5
+
+LFO_RATE_MIN = 0.1
+LFO_RATE_MAX = 8
+
 LED_COLOR = const(0xFF00FF)
 LED_PRESS_COLOR = const(0xFFFF00)
 LED_LATCH_COLOR = const(0xFF0000)
@@ -49,30 +57,64 @@ synthiota = Synthiota(
     channel_count=1,
 )
 
+effect_args = {
+    "buffer_size": synthiota.buffer_size,
+    "sample_rate": synthiota.sample_rate,
+    "channel_count": synthiota.channel_count,
+}
+
 effect_echo = Echo(
     freq_shift=True,
-    buffer_size=synthiota.buffer_size,
-    sample_rate=synthiota.sample_rate,
-    channel_count=synthiota.channel_count,
+    **effect_args,
 )
 synthiota.mixer.play(effect_echo)
 
 effect_phaser = Phaser(
     frequency=LFO(offset=1000, scale=600),
-    buffer_size=synthiota.buffer_size,
-    sample_rate=synthiota.sample_rate,
-    channel_count=synthiota.channel_count,
+    **effect_args,
 )
 effect_echo.play(effect_phaser)
 
-effect_distortion = Distortion(
-    mode=DistortionMode.OVERDRIVE,
-    soft_clip=True,
-    buffer_size=synthiota.buffer_size,
-    sample_rate=synthiota.sample_rate,
-    channel_count=synthiota.channel_count,
+filter_envelope = AREnvelope()
+filter_lfo = LFO()
+filter_delay = LFO(
+    waveform=np.array([0, 32767], dtype=np.int16),
+    scale=1.0,
+    once=True,
 )
-effect_phaser.play(effect_distortion)
+filter_frequency = Math(
+    MathOperation.MID,
+    20.0,
+    Math(
+        MathOperation.SUM,
+        synthiota.sample_rate / 2,
+        filter_envelope.block,
+        Math(
+            MathOperation.PRODUCT,
+            filter_lfo,
+            filter_delay,
+        ),
+    ),
+    synthiota.sample_rate / 2
+)
+
+effect_filter = Filter(
+    filter=[
+        Biquad(
+            mode=FilterMode.LOW_PASS,
+            frequency=filter_frequency
+        )
+        for i in range(4)
+    ],
+    **effect_args,
+)
+effect_phaser.play(effect_filter)
+
+effect_distortion = Distortion(
+    mode=DistortionMode.CLIP,
+    **effect_args,
+)
+effect_filter.play(effect_distortion)
 
 synth = Synthesizer(
     sample_rate=synthiota.sample_rate,
@@ -81,6 +123,11 @@ synth = Synthesizer(
 effect_distortion.play(synth)
 
 voice = Drone(synth, max_oscillators=8)
+
+# disable default filter
+for note in voice._notes:
+    note.filter = None
+voice._biquad = None
 
 # parameters
 PARAM_WINDOW = 0.01
@@ -120,7 +167,11 @@ class Parameter:
     
     def _setattr(self) -> None:
         if self._object is not None and len(self._name):
-            setattr(self._object, self._name, self._map_value)
+            if isinstance(self._object, list) or isinstance(self._object, tuple):
+                for obj in self._object:
+                    setattr(obj, self._name, self._map_value)
+            else:
+                setattr(self._object, self._name, self._map_value)
         
     def deactivate(self) -> None:
         self._active = False
@@ -176,25 +227,36 @@ PAGES = (
         (
             ("LVL", Parameter(synthiota.mixer.voice[0], "level", 0, 1, 0.25)),
             ("OSC", Parameter(voice, "oscillators", 1, 8, 3, round=True)),
+
             ("FQ", Parameter(voice, "tune", -4, 2, -2)),
             ("DT", Parameter(voice, "detune")),
-            ("AMP", Parameter(voice, "amplitude", 0, 1/8, 1/8)),
-            ("ATK", Parameter(voice, "attack_time", 0.001, 5, 0.5, 4)),
-            ("RLS", Parameter(voice, "release_time", 0.001, 5, 0.5, 4)),
-            ("GLD", Parameter(voice, "glide", 0.001, 5, 0.05, 4)),
+            ("GLD", Parameter(voice, "glide", ENVELOPE_TIME_MIN, ENVELOPE_TIME_MAX, shape=4)),
+
+            ("RAT", Parameter(voice, "vibrato_rate", LFO_RATE_MIN, LFO_RATE_MAX, 1, 3)),
+            ("DPT", Parameter(voice, "vibrato_depth")),
         )
     ),
     (
-        "MOD",
+        "ENV",
         (
-            ("VR", Parameter(voice, "vibrato_rate", 0.1, 8, 1, 3)),
-            ("VA", Parameter(voice, "vibrato_depth")),
+            ("AMP", Parameter(voice, "amplitude", 0, 1/8)),
+            ("ATK", Parameter(voice, "attack_time", ENVELOPE_TIME_MIN, ENVELOPE_TIME_MAX, shape=4)),
+            ("RLS", Parameter(voice, "release_time", ENVELOPE_TIME_MIN, ENVELOPE_TIME_MAX, shape=4)),
 
-            ("TR", Parameter(voice, "tremolo_rate", 0.1, 8, 1, 3)),
-            ("TA", Parameter(voice, "tremolo_depth")),
-
-            ("FR", Parameter(voice, "filter_rate", 0.1, 8, 1, 3)),
-            ("FA", Parameter(voice, "filter_depth")),
+            ("RAT", Parameter(voice, "tremolo_rate", LFO_RATE_MIN, LFO_RATE_MAX, 1, 3)),
+            ("DPT", Parameter(voice, "tremolo_depth")),
+            ("VEL", Parameter(voice, "velocity_amount")),
+        )
+    ),
+    (
+        "FLT",
+        (
+            ("RAT", Parameter(filter_lfo, "rate", LFO_RATE_MIN, LFO_RATE_MAX, 1, 3)),
+            ("DPT", Parameter(filter_lfo, "scale", maximum=synthiota.sample_rate / 4, shape=3)),
+            ("ATK", Parameter(filter_envelope, "attack_time", ENVELOPE_TIME_MIN, ENVELOPE_TIME_MAX, shape=4)),
+            ("RLS", Parameter(filter_envelope, "release_time", ENVELOPE_TIME_MIN, ENVELOPE_TIME_MAX, shape=4)),
+            ("AMT", Parameter(filter_envelope, "amount", maximum=synthiota.sample_rate / 2, shape=3)),
+            ("DLY", Parameter(filter_delay, "rate", 1 / ENVELOPE_TIME_MIN, 1 / ENVELOPE_TIME_MAX, shape=4)),
         )
     ),
     (
@@ -207,7 +269,7 @@ PAGES = (
             ("DD", Parameter(effect_distortion, "drive", value=0.5)),
             ("DM", Parameter(effect_distortion, "mix")),
 
-            ("PR", Parameter(effect_phaser.frequency, "rate", 0.1, 8, 1, 3)),
+            ("PR", Parameter(effect_phaser.frequency, "rate", LFO_RATE_MIN, LFO_RATE_MAX, 1, 3)),
             ("PF", Parameter(effect_phaser, "feedback", value=0.5)),
             ("PM", Parameter(effect_phaser, "mix")),
         )
@@ -215,14 +277,14 @@ PAGES = (
 )
 
 left_slider_parameter = Parameter(
-    voice, "filter_frequency",
+    filter_frequency.b, "a",
     20, synthiota.sample_rate / 2, 2000,
     shape=4, smoothing=0.05, window=False,
 )
 
 right_slider_parameter = Parameter(
-    voice, "filter_resonance",
-    0.7, 16, 1.5,
+    effect_filter.filter, "Q",
+    0.7071067811865475, 8, 1.5,
     shape=2, smoothing=0.05, window=False,
 )
 
@@ -342,6 +404,15 @@ def apply_brightness(color: int, value: float, shape: int = 2) -> int:
 def get_lfo_value(lfo: LFO, max_scale: float = 1, minimum: float = 0, maximum: float = 1) -> float:
     return map_value(lfo.value, lfo.offset - max_scale, lfo.offset + max_scale, minimum, maximum)
 
+def press(notenum: int = None) -> None:
+    if voice.press(notenum):
+        filter_envelope.press()
+        filter_delay.retrigger()
+
+def release() -> None:
+    if voice.release():
+        filter_envelope.release()
+
 latched = False
 step_index = None
 led_index = None
@@ -371,10 +442,10 @@ while True:
     if synthiota.encoder_button.pressed:
         latched = not latched
         if latched and not voice.pressed:
-            voice.press()
+            press()
             led_index = 0
         elif not latched and voice.pressed:
-            voice.release()
+            release()
             led_index = None
 
     # handle step touches
@@ -382,12 +453,12 @@ while True:
         index = "".join(map(lambda x: str(int(x)), synthiota.touched_steps)).rindex("1")
     except ValueError:
         if not latched and voice.pressed:
-            voice.release()
+            release()
             led_index = None
         step_index = None
     else:
         if index != step_index:
-            voice.press(48 + index)
+            press(48 + index)
             step_index = index
             led_index = index
 
